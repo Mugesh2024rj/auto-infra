@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .sidebar-item {
+    @apply flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors hover:bg-accent hover:text-accent-foreground;
+  }
+  
+  .sidebar-item.active {
+    @apply bg-primary text-primary-foreground;
+  }
+  
+  .dashboard-card {
+    @apply bg-card border border-border rounded-lg p-6 shadow-sm;
+  }
+  
+  .metric-card {
+    @apply bg-card border border-border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow;
+  }
+  
+  .health-bar {
+    @apply bg-secondary rounded-full h-2 overflow-hidden;
+  }
+  
+  .health-bar-fill {
+    @apply h-full bg-primary transition-all duration-500 ease-out;
+  }
+}

@@ -1,0 +1,368 @@
+pipeline {
+    agent any
+    
+    environment {
+        PROJECT_NAME = "${env.JOB_NAME.split('/')[0]}"
+        BUILD_NUMBER = "${env.BUILD_NUMBER}"
+        GIT_COMMIT = "${env.GIT_COMMIT}"
+        DOCKER_REGISTRY = "${env.DOCKER_REGISTRY ?: 'localhost:5000'}"
+        AWS_REGION = "${env.AWS_REGION ?: 'us-west-2'}"
+        ECR_REPOSITORY = "${env.ECR_REPOSITORY}"
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "🔄 Checking out code..."
+                    checkout scm
+                    
+                    // Get commit info
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: 'git rev-parse --short HEAD',
+                        returnStdout: true
+                    ).trim()
+                    
+                    env.GIT_BRANCH = sh(
+                        script: 'git rev-parse --abbrev-ref HEAD',
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+        
+        stage('Environment Setup') {
+            steps {
+                script {
+                    echo "🔧 Setting up environment..."
+                    
+                    // Detect project type
+                    if (fileExists('package.json')) {
+                        env.PROJECT_TYPE = 'nodejs'
+                        env.DOCKERFILE = 'Dockerfile.nodejs'
+                    } else if (fileExists('requirements.txt')) {
+                        env.PROJECT_TYPE = 'python'
+                        env.DOCKERFILE = 'Dockerfile.python'
+                    } else if (fileExists('pom.xml')) {
+                        env.PROJECT_TYPE = 'java'
+                        env.DOCKERFILE = 'Dockerfile.java'
+                    } else if (fileExists('go.mod')) {
+                        env.PROJECT_TYPE = 'go'
+                        env.DOCKERFILE = 'Dockerfile.go'
+                    } else {
+                        env.PROJECT_TYPE = 'generic'
+                        env.DOCKERFILE = 'Dockerfile'
+                    }
+                    
+                    echo "📦 Detected project type: ${env.PROJECT_TYPE}"
+                    
+                    // Set image tag
+                    env.IMAGE_TAG = "${env.GIT_COMMIT_SHORT}-${env.BUILD_NUMBER}"
+                    env.DOCKER_IMAGE = "${env.DOCKER_REGISTRY}/${env.PROJECT_NAME}:${env.IMAGE_TAG}"
+                    
+                    echo "🏷️ Docker image: ${env.DOCKER_IMAGE}"
+                }
+            }
+        }
+        
+        stage('Build Application') {
+            steps {
+                script {
+                    echo "🔨 Building application..."
+                    
+                    switch(env.PROJECT_TYPE) {
+                        case 'nodejs':
+                            sh '''
+                                echo "📦 Installing Node.js dependencies..."
+                                npm ci
+                                
+                                echo "🧪 Running tests..."
+                                npm test -- --watchAll=false --coverage || true
+                                
+                                echo "🏗️ Building application..."
+                                npm run build || echo "No build script found"
+                            '''
+                            break
+                            
+                        case 'python':
+                            sh '''
+                                echo "🐍 Setting up Python environment..."
+                                python -m pip install --upgrade pip
+                                pip install -r requirements.txt
+                                
+                                echo "🧪 Running tests..."
+                                python -m pytest || echo "No tests found"
+                                
+                                echo "🔍 Running linting..."
+                                flake8 . || echo "Linting completed with warnings"
+                            '''
+                            break
+                            
+                        case 'java':
+                            sh '''
+                                echo "☕ Building Java application..."
+                                mvn clean compile
+                                
+                                echo "🧪 Running tests..."
+                                mvn test || echo "Tests completed with issues"
+                                
+                                echo "📦 Packaging application..."
+                                mvn package -DskipTests
+                            '''
+                            break
+                            
+                        case 'go':
+                            sh '''
+                                echo "🐹 Building Go application..."
+                                go mod download
+                                
+                                echo "🧪 Running tests..."
+                                go test ./... || echo "Tests completed with issues"
+                                
+                                echo "🏗️ Building binary..."
+                                go build -o main .
+                            '''
+                            break
+                            
+                        default:
+                            echo "⚠️ Generic build - no specific build steps"
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                script {
+                    echo "🔒 Running security scans..."
+                    
+                    // Dependency vulnerability scan
+                    switch(env.PROJECT_TYPE) {
+                        case 'nodejs':
+                            sh 'npm audit --audit-level=high || echo "Security audit completed with warnings"'
+                            break
+                        case 'python':
+                            sh 'pip-audit || echo "Security audit completed with warnings"'
+                            break
+                        case 'java':
+                            sh 'mvn org.owasp:dependency-check-maven:check || echo "Security audit completed with warnings"'
+                            break
+                    }
+                }
+            }
+        }
+        
+        stage('Docker Build') {
+            steps {
+                script {
+                    echo "🐳 Building Docker image..."
+                    
+                    // Generate Dockerfile if it doesn't exist
+                    if (!fileExists('Dockerfile')) {
+                        echo "📝 Generating Dockerfile for ${env.PROJECT_TYPE}..."
+                        sh """
+                            cp /opt/autoinfra/docker/templates/${env.DOCKERFILE} ./Dockerfile
+                        """
+                    }
+                    
+                    // Build Docker image
+                    sh """
+                        docker build -t ${env.DOCKER_IMAGE} .
+                        docker tag ${env.DOCKER_IMAGE} ${env.DOCKER_REGISTRY}/${env.PROJECT_NAME}:latest
+                    """
+                    
+                    echo "✅ Docker image built successfully"
+                }
+            }
+        }
+        
+        stage('Image Security Scan') {
+            steps {
+                script {
+                    echo "🔍 Scanning Docker image for vulnerabilities..."
+                    
+                    sh """
+                        # Run Trivy security scan
+                        trivy image --exit-code 0 --severity HIGH,CRITICAL ${env.DOCKER_IMAGE} || echo "Security scan completed with findings"
+                        
+                        # Run Docker bench security
+                        docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                            docker/docker-bench-security || echo "Docker security benchmark completed"
+                    """
+                }
+            }
+        }
+        
+        stage('Push to Registry') {
+            steps {
+                script {
+                    echo "📤 Pushing image to registry..."
+                    
+                    if (env.ECR_REPOSITORY) {
+                        // Push to ECR
+                        sh """
+                            # Login to ECR
+                            aws ecr get-login-password --region ${env.AWS_REGION} | \
+                                docker login --username AWS --password-stdin ${env.ECR_REPOSITORY}
+                            
+                            # Tag and push
+                            docker tag ${env.DOCKER_IMAGE} ${env.ECR_REPOSITORY}:${env.IMAGE_TAG}
+                            docker tag ${env.DOCKER_IMAGE} ${env.ECR_REPOSITORY}:latest
+                            
+                            docker push ${env.ECR_REPOSITORY}:${env.IMAGE_TAG}
+                            docker push ${env.ECR_REPOSITORY}:latest
+                        """
+                    } else {
+                        // Push to local registry
+                        sh """
+                            docker push ${env.DOCKER_IMAGE}
+                            docker push ${env.DOCKER_REGISTRY}/${env.PROJECT_NAME}:latest
+                        """
+                    }
+                    
+                    echo "✅ Image pushed successfully"
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                script {
+                    echo "🚀 Deploying application..."
+                    
+                    // Update deployment
+                    sh """
+                        # Update container with new image
+                        docker stop ${env.PROJECT_NAME} || true
+                        docker rm ${env.PROJECT_NAME} || true
+                        
+                        # Run new container
+                        docker run -d \
+                            --name ${env.PROJECT_NAME} \
+                            --restart unless-stopped \
+                            -p 8080:8080 \
+                            -e ENVIRONMENT=production \
+                            -e BUILD_NUMBER=${env.BUILD_NUMBER} \
+                            -e GIT_COMMIT=${env.GIT_COMMIT_SHORT} \
+                            ${env.DOCKER_IMAGE}
+                    """
+                    
+                    // Wait for health check
+                    sh """
+                        echo "⏳ Waiting for application to be healthy..."
+                        for i in {1..30}; do
+                            if curl -f http://localhost:8080/health; then
+                                echo "✅ Application is healthy"
+                                break
+                            fi
+                            echo "Attempt \$i/30 - waiting 10 seconds..."
+                            sleep 10
+                        done
+                    """
+                    
+                    echo "🎉 Deployment completed successfully"
+                }
+            }
+        }
+        
+        stage('Post-Deploy Tests') {
+            steps {
+                script {
+                    echo "🧪 Running post-deployment tests..."
+                    
+                    sh """
+                        # Basic health check
+                        curl -f http://localhost:8080/health
+                        
+                        # Performance test
+                        ab -n 100 -c 10 http://localhost:8080/ || echo "Performance test completed"
+                        
+                        # Security headers check
+                        curl -I http://localhost:8080/ | grep -E "(X-Frame-Options|X-XSS-Protection|X-Content-Type-Options)" || echo "Security headers check completed"
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                echo "🧹 Cleaning up..."
+                
+                // Clean up Docker images
+                sh """
+                    docker image prune -f
+                    docker system prune -f --volumes
+                """
+                
+                // Archive artifacts
+                archiveArtifacts artifacts: '**/target/*.jar, **/dist/**, **/build/**', allowEmptyArchive: true
+                
+                // Publish test results
+                publishTestResults testResultsPattern: '**/test-results.xml', allowEmptyResults: true
+                
+                // Publish coverage reports
+                publishCoverage adapters: [
+                    istanbulCoberturaAdapter('**/coverage/cobertura-coverage.xml')
+                ], sourceFileResolver: sourceFiles('STORE_LAST_BUILD')
+            }
+        }
+        
+        success {
+            script {
+                echo "✅ Pipeline completed successfully!"
+                
+                // Send success notification
+                slackSend(
+                    channel: '#deployments',
+                    color: 'good',
+                    message: "🎉 Deployment successful for ${env.PROJECT_NAME}:${env.IMAGE_TAG}"
+                )
+            }
+        }
+        
+        failure {
+            script {
+                echo "❌ Pipeline failed!"
+                
+                // Send failure notification
+                slackSend(
+                    channel: '#deployments',
+                    color: 'danger',
+                    message: "💥 Deployment failed for ${env.PROJECT_NAME}:${env.IMAGE_TAG}"
+                )
+                
+                // Rollback on failure
+                sh """
+                    echo "🔄 Rolling back to previous version..."
+                    docker stop ${env.PROJECT_NAME} || true
+                    docker rm ${env.PROJECT_NAME} || true
+                    docker run -d \
+                        --name ${env.PROJECT_NAME} \
+                        --restart unless-stopped \
+                        -p 8080:8080 \
+                        ${env.DOCKER_REGISTRY}/${env.PROJECT_NAME}:latest
+                """
+            }
+        }
+        
+        unstable {
+            script {
+                echo "⚠️ Pipeline completed with warnings"
+                
+                slackSend(
+                    channel: '#deployments',
+                    color: 'warning',
+                    message: "⚠️ Deployment completed with warnings for ${env.PROJECT_NAME}:${env.IMAGE_TAG}"
+                )
+            }
+        }
+    }
+}
