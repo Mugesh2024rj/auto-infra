@@ -1,0 +1,81 @@
+# Code_to_Auto Prototype Assessment
+
+## Project Overview
+Infrastructure automation and deployment platform with AWS integration
+## 1. Prototype Objective (1 sentence)
+
+**Objective:** 
+Enter your objective here
+## 2. Success Criteria (Top 3 Metrics)
+
+| Metric | Target | Observed | Status |
+|--------|--------|----------|--------|
+| Metric 1: ___ | ___ | ___ | ⬜ |
+| Metric 2: ___ | ___ | ___ | ⬜ |
+| Metric 3: ___ | ___ | ___ | ⬜ |
+## 3. REAL vs SIMULATED Components
+
+### REAL Components
+- [ ] Component 1
+- [ ] Component 2
+- [ ] Component 3
+
+### SIMULATED Components
+- [ ] Component 1
+- [ ] Component 2
+- [ ] Component 3
+## 4. Architecture Overview
+
+### Technology Stack
+- **Frontend:** React + Vite + Tailwind CSS
+- **Backend:** Node.js/Express
+- **Infrastructure:** AWS + Docker + Terraform
+- **CI/CD:** Jenkins
+- **Database:** PostgreSQL
+
+### Key Components
+1. **Client** - React-based dashboard
+2. **Server** - Express API with AWS services
+3. **Docker** - Container templates for various stacks
+4. **Terraform** - IaC for AWS resource provisioning
+5. **Jenkins** - Automated deployment pipeline
+## 5. Project Links & Artifacts
+
+### Documentation
+- [README](../README.md)
+- [Troubleshooting Guide](./autoinfra/TROUBLESHOOTING.md)
+
+### Code Repositories
+- **Client Code:** `./autoinfra/client/`
+- **Server Code:** `./autoinfra/server/`
+- **Infrastructure:** `./autoinfra/terraform/`
+- **CI/CD:** `./autoinfra/jenkins/`
+
+### Configuration Files
+- Docker Compose: `./autoinfra/docker-compose.yml`
+- Database Init: `./autoinfra/server/database/init.sql`
+- Terraform Config: `./autoinfra/terraform/main.tf`
+
+### External Links
+- AWS Console: [https://console.aws.amazon.com](https://console.aws.amazon.com)
+- Jenkins Dashboard: `http://localhost:8080` (local)
+- Application: `http://localhost:5173` (dev) or configured domain
+## 6. Deployment Artifacts
+
+### Docker Images
+- Client: `./autoinfra/client/Dockerfile`
+- Server: `./autoinfra/server/Dockerfile`
+- Templates: `./autoinfra/docker/templates/` (Java, Node.js, Python, React)
+
+### Infrastructure as Code
+- Terraform Main Config: `./autoinfra/terraform/main.tf`
+- Variables: `./autoinfra/terraform/variables.tf`
+- Outputs: `./autoinfra/terraform/outputs.tf`
+- User Data Script: `./autoinfra/terraform/user_data.sh`
+
+### Build Artifacts
+- Build Directory: `./autoinfra/client/dist/` (client build)
+- Server Build: `./autoinfra/server/build/`
+## 7. Notes & Comments
+
+Enter any additional notes, blockers, or observations here.
